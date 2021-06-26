@@ -28,9 +28,11 @@ You should have received a copy of the GNU General Public License along with thi
 #property indicator_plots 1
 //---- Imports
 //---- Include Libraries and Modules
-#include <MT-Utilities.mqh>
 // Metatrader 5 has a limitation of 64 User Input Variable description, for reference this has 64 traces ----------------------------------------------------------------
 //---- Definitions
+#ifndef ErrorPrint
+#define ErrorPrint(Dp_error) Print("ERROR: " + Dp_error + " at \"" + __FUNCTION__ + ":" + IntegerToString(__LINE__) + "\", last internal error: " + IntegerToString(GetLastError()) + " (" + __FILE__ + ")"); ResetLastError(); DebugBreak(); // It should be noted that the GetLastError() function doesn't zero the _LastError variable. Usually the ResetLastError() function is called before calling a function, after which an error appearance is checked.
+#endif
 //#define INPUT const
 #ifndef INPUT
 #define INPUT input
@@ -335,9 +337,43 @@ int OnCalculate(const int rates_total,
 // Extra functions, utilities and conversion
 //+------------------------------------------------------------------+
 //+------------------------------------------------------------------+
+// Color
+// Parameters c1 and c2 are ARGB Colors to Gradient into the return value
+// Gradient and Alpha is a percentage from c1 towards c2, accepts any range, but anything out of [0; 1.0] is cut
+// The return value of the function is guaranteed to be between [0xYY000000; 0xYYFFFFFF], even if the gradient is invalid, and YY equals to the Alpha between [0; 1.0] -> AA[0; 255]
+// If using "colors", Alpha should be 0.0 or it will mess with the printed colors
+//+------------------------------------------------------------------+
+uint argbGradient(uint c1, uint c2, double gradient = 0.5, double alpha = 0.0)
+{
+    uint c = 0x00000000;
+    // Red is at 0x000000##
+    // Green is at 0x0000##00
+    // Blue is at 0x00##0000
+    // There is no Alpha for Plots and Buffers, but for some reason, the function ColorToARGB() exists in the documentation, for Alpha at 0x##000000
+    if(gradient > 1.0) gradient = 1.0;
+    else if (gradient < +0.0) gradient = +0.0;
+    if(alpha > 1.0) alpha = 1.0;
+    else if(alpha < +0.0) alpha = +0.0;
+    uint red1 = (c1 & 0xFF);
+    uint green1 = (c1 & 0xFF00) >> 8;
+    uint blue1 = (c1 & 0xFF0000) >> 16;
+    uint alpha1 = (c1 & 0xFF000000) >> 24;
+    uint red2 = (c2 & 0xFF);
+    uint green2 = (c2 & 0xFF00) >> 8;
+    uint blue2 = (c2 & 0xFF0000) >> 16;
+    uint alpha2 = (c2 & 0xFF000000) >> 24;
+    if (red1 > red2) c = ((uint) (red1 - ((red1 - red2) * gradient))) & 0xFF;
+    else c = ((uint) (red1 + ((red2 - red1) * gradient))) & 0xFF;
+    if (green1 > green2) c = ((((uint) (green1 - ((green1 - green2) * gradient))) & 0xFF) << 8) + c;
+    else c = ((((uint) (green1 + ((green2 - green1) * gradient))) & 0xFF) << 8) + c;
+    if (blue1 > blue2) c = ((((uint) (blue1 - ((blue1 - blue2) * gradient))) & 0xFF) << 16) + c;
+    else c = ((((uint) (blue1 + ((blue2 - blue1) * gradient))) & 0xFF) << 16) + c;
+    if (alpha1 > alpha2) c = ((((uint) (alpha1 - ((alpha1 - alpha2) * alpha))) & 0xFF) << 24) + c;
+    else c = ((((uint) (alpha1 + ((alpha2 - alpha1) * alpha))) & 0xFF) << 24) + c;
+    return c;
+}
+//+------------------------------------------------------------------+
 //| Header Guard #endif
 //+------------------------------------------------------------------+
 #endif
-//+------------------------------------------------------------------+
-
 //+------------------------------------------------------------------+
