@@ -21,13 +21,14 @@ You should have received a copy of the GNU General Public License along with thi
 #property copyright "2021, Mateus Matucuma Teixeira"
 #property link "https://github.com/BRMateus2/"
 #property description "Volume Colored Candlestick with Bollinger Bands as the Standard Deviation"
-#property version "1.00"
-#property strict
+#property version "1.01"
+#property fpfast
 #property indicator_chart_window
 #property indicator_buffers 8
 #property indicator_plots 1
 //---- Imports
 //---- Include Libraries and Modules
+//#include <MT-Utilities.mqh>
 // Metatrader 5 has a limitation of 64 User Input Variable description, for reference this has 64 traces ----------------------------------------------------------------
 //---- Definitions
 #ifndef ErrorPrint
@@ -45,12 +46,12 @@ string iName = "VolumeCandles";
 INPUT int iPeriodInp = 1440; // Period of Bollinger Bands
 int iPeriod = 60; // Backup iPeriod if user inserts wrong value
 INPUT double iBandsDev = 2.0; // Bollinger Bands Standard Deviation
-INPUT double iSensitivity = 0.50; // Sensitivity, default 0.50, lower means less sensitive
+INPUT double iSensitivity = 1.0; // Sensitivity, default 1.0, lower means less sensitive
 INPUT bool iShowIndicators = false; // Calibration: show calculation indicators in chart
 INPUT bool iShowGradient = false; // Calibration: show gradients in chart
 // Explanation: we want to have three gradients, from [cLow; cMean[ and [cMean; cHigh], but to cHigh be inclusive, we need a module of cGradientSize % cCount equal to 1, as it happens that is the slot needed for cHigh to be correctly placed in the Index - for every extra gradient, there must be one "free slot" to put the last color
-INPUT color cLow = 0xE0E080; // Low Volume
-INPUT color cAvg = 0x00D0F0; // Average Volume
+INPUT color cLow = 0xF0E040; // Low Volume
+INPUT color cAvg = 0x00F0E0; // Average Volume
 INPUT color cHigh = 0x2020FF; // High Volume
 const int cCount = 2; // Counter of gradient variations (cLow->cMean is one, cMean->cHigh is the second)
 const int cGradientSize = 63; // Has a platform limit of 64! There is also some math craziness to make the gradients fit all colors without loss
@@ -140,9 +141,15 @@ int OnInit()
     } else {
         iPeriod = iPeriodInp;
     }
+    // iSensitivity should not be Zero, neither negative, or else Exception Division by Zero, or undesirable calculations resulting in negative
+    if(iSensitivity < 0.001) {
+        ErrorPrint("Sensitivity cannot be smaller than 0.001");
+        return INIT_PARAMETERS_INCORRECT;
+    }
     // Check for free slot in the Color Indexes
     if((cGradientSize % cCount) != 1) {
         ErrorPrint("cGradientSize is not divisible by cCount without there being one free slot, as for the fact that [cGradients; ...; cGradients] can't be closed correctly");
+        return INIT_PARAMETERS_INCORRECT;
     }
     // Treat Indicator
     // Treat Handlers and Buffers
@@ -219,10 +226,10 @@ int OnInit()
     }
     // Set color for each index
     for(int i = 0; i < cGradientParts; i++) {
-        PlotIndexSetInteger(iBufOpenI, PLOT_LINE_COLOR, i, argbGradient(cLow, cAvg, (1.0 - (((double) cGradientParts - i) / cGradientParts))));
-        PlotIndexSetInteger(iBufOpenI, PLOT_LINE_COLOR, i + cGradientParts, argbGradient(cAvg, cHigh, (1.0 - (((double) cGradientParts - i) / cGradientParts))));
+        PlotIndexSetInteger(iBufOpenI, PLOT_LINE_COLOR, i, argbGradient(cLow, cAvg, (1.0 - (((double) cGradientParts - i) / cGradientParts)))); // [cLow; cAvg[ on 31 elements, cAvg is not part of the 31 elements, [0; 30] indexable elements
+        PlotIndexSetInteger(iBufOpenI, PLOT_LINE_COLOR, i + cGradientParts, argbGradient(cAvg, cHigh, (1.0 - (((double) cGradientParts - i) / cGradientParts)))); // [cAvg; cHigh[ on 31 elements, [31; 62] indexable elements
     }
-    PlotIndexSetInteger(iBufOpenI, PLOT_LINE_COLOR, (cGradientSize - 1), argbGradient(cAvg, cHigh, 1.0)); // Set the last slot
+    PlotIndexSetInteger(iBufOpenI, PLOT_LINE_COLOR, (cGradientSize - 1), argbGradient(cAvg, cHigh, 1.0)); // Set the last slot, to finalize [cAvg; cHigh] a full 32 elements, totalling 63 colors - yes, it is "biased by one" because cAvg is at slot 31, and we now have [32; 63] between ]cAvg; cHigh]
     //for(int i = 0; i < cGradientSize+1; i++) Print(IntegerToString(i, 2, '0') + " " + ColorToString(PlotIndexGetInteger(iBufOpenI, PLOT_LINE_COLOR, i))); // Debug
     // Indicator Subwindow Short Name
     iName = StringFormat("VC(%d)", iPeriod); // Indicator name in Subwindow
@@ -280,15 +287,30 @@ int OnCalculate(const int rates_total,
         iBufHigh[i] = high[i];
         iBufLow[i] = low[i];
         iBufClose[i] = close[i];
-        if((ENUM_APPLIED_VOLUMEInp == VOLUME_TICK ? tick_volume[i] : volume[i]) > iBandsBufMiddle[i]) {
-            double indexColor = MathRound(((iSensitivity * ((ENUM_APPLIED_VOLUMEInp == VOLUME_TICK) ? (tick_volume[i] - iBandsBufMiddle[i]) : (volume[i] - iBandsBufMiddle[i])) / (iBandsBufUpper[i] - iBandsBufMiddle[i])) * (double) cGradientParts) + cGradientParts);
+        if(((ENUM_APPLIED_VOLUMEInp == VOLUME_TICK) ? tick_volume[i] : volume[i]) > iBandsBufMiddle[i]) {
+            // Normalization Formula's -> xNormalized = (x - xMinimum) / (xMaximum - xMinimum), where x = Volume, xMinimum = iBandsBufMiddle and xMaximum = iBandsBufUpper
+            double indexColor = (MathRound((
+                                               iSensitivity *
+                                               (((ENUM_APPLIED_VOLUMEInp == VOLUME_TICK) ? (tick_volume[i] - iBandsBufMiddle[i]) : (volume[i] - iBandsBufMiddle[i]))
+                                                / (((iBandsBufUpper[i] - iBandsBufMiddle[i]) == 0.0) ? 1.0 : (iBandsBufUpper[i] - iBandsBufMiddle[i]))
+                                               ))
+                                           * (double) cGradientParts
+                                          )
+                                 + cGradientParts);
             if(indexColor < cGradientParts) indexColor = cGradientParts;
             else if(indexColor >= cGradientSize) indexColor = cGradientSize - 1;
             iBufColor[i] = indexColor;
         } else { // The comparison of BufLower and 0.0, is because volume should never be negative; the stddev does not consider this fact and biases the lower color indexes to never show, depending on the situation - the comparison fixes the lower indexes not showing, but biases towards a lower-index color below BufMiddle, which seems to be acceptable
-            double indexColor = MathRound(((iSensitivity * ((ENUM_APPLIED_VOLUMEInp == VOLUME_TICK) ? (iBandsBufMiddle[i] - tick_volume[i]) : (iBandsBufMiddle[i] - volume[i]))) / (iBandsBufMiddle[i] - (iBandsBufLower[i] > 0.0 ? iBandsBufLower[i] : 0.0))) * (double) cGradientParts);
-            if(indexColor < 0.0) indexColor = 0.0; // This seems to be impossible to reach
-            else if(indexColor >= cGradientParts) indexColor = cGradientParts - 1;
+            // Normalization Formula's -> xNormalized = (x - xMinimum) / (xMaximum - xMinimum), where x = Volume, xMinimum = iBandsBufLower and xMaximum = iBandsBufMiddle
+            double indexColor = MathRound((
+                                              (1.0 / iSensitivity) *
+                                              (((ENUM_APPLIED_VOLUMEInp == VOLUME_TICK) ? (tick_volume[i] - (iBandsBufLower[i] < 0.0 ? 0.0 : iBandsBufLower[i])) : (volume[i] - (iBandsBufLower[i] < 0.0 ? 0.0 : iBandsBufLower[i])))
+                                               / (((iBandsBufMiddle[i] - ((iBandsBufLower[i] < 0.0) ? 0.0 : iBandsBufLower[i])) == 0.0) ? 1.0 : (iBandsBufMiddle[i] - ((iBandsBufLower[i] < 0.0) ? 0.0 : iBandsBufLower[i])))
+                                              ))
+                                          * (double) cGradientParts
+                                         );
+            if(indexColor < 0.0) indexColor = 0.0;
+            else if(indexColor > cGradientParts) indexColor = cGradientParts - 1;
             iBufColor[i] = indexColor;
         }
         if(iShowGradient) {
@@ -341,7 +363,7 @@ int OnCalculate(const int rates_total,
 // Parameters c1 and c2 are ARGB Colors to Gradient into the return value
 // Gradient and Alpha is a percentage from c1 towards c2, accepts any range, but anything out of [0; 1.0] is cut
 // The return value of the function is guaranteed to be between [0xYY000000; 0xYYFFFFFF], even if the gradient is invalid, and YY equals to the Alpha between [0; 1.0] -> AA[0; 255]
-// If using "colors", Alpha should be 0.0 or it will mess with the printed colors
+// If using "colors", which is a MQL5 type for 24-bit RGB color with no Alpha, Alpha should be 0.0, and c1 Alpha (bits [24; 32[) should be Zero, or it will mess with the printed colors
 //+------------------------------------------------------------------+
 uint argbGradient(uint c1, uint c2, double gradient = 0.5, double alpha = 0.0)
 {
@@ -350,30 +372,30 @@ uint argbGradient(uint c1, uint c2, double gradient = 0.5, double alpha = 0.0)
     // Green is at 0x0000##00
     // Blue is at 0x00##0000
     // There is no Alpha for Plots and Buffers, but for some reason, the function ColorToARGB() exists in the documentation, for Alpha at 0x##000000
-    if(gradient > 1.0) gradient = 1.0;
+    if(gradient > 1.0) gradient = 1.0; // Guarantees range [+0.0; +1.0]
     else if (gradient < +0.0) gradient = +0.0;
     if(alpha > 1.0) alpha = 1.0;
     else if(alpha < +0.0) alpha = +0.0;
-    uint red1 = (c1 & 0xFF);
-    uint green1 = (c1 & 0xFF00) >> 8;
+    uint red1 = (c1 & 0xFF); // Bitwise/extract the first 16 binary digits
+    uint green1 = (c1 & 0xFF00) >> 8; // Bitwise/extract the binary digits, ranging from [16;31], and Bitshift them 16 binary moves towards zero, shifted to [0; 15]
     uint blue1 = (c1 & 0xFF0000) >> 16;
     uint alpha1 = (c1 & 0xFF000000) >> 24;
     uint red2 = (c2 & 0xFF);
     uint green2 = (c2 & 0xFF00) >> 8;
     uint blue2 = (c2 & 0xFF0000) >> 16;
     uint alpha2 = (c2 & 0xFF000000) >> 24;
-    if (red1 > red2) c = ((uint) (red1 - ((red1 - red2) * gradient))) & 0xFF;
-    else c = ((uint) (red1 + ((red2 - red1) * gradient))) & 0xFF;
-    if (green1 > green2) c = ((((uint) (green1 - ((green1 - green2) * gradient))) & 0xFF) << 8) + c;
-    else c = ((((uint) (green1 + ((green2 - green1) * gradient))) & 0xFF) << 8) + c;
-    if (blue1 > blue2) c = ((((uint) (blue1 - ((blue1 - blue2) * gradient))) & 0xFF) << 16) + c;
-    else c = ((((uint) (blue1 + ((blue2 - blue1) * gradient))) & 0xFF) << 16) + c;
-    if (alpha1 > alpha2) c = ((((uint) (alpha1 - ((alpha1 - alpha2) * alpha))) & 0xFF) << 24) + c;
-    else c = ((((uint) (alpha1 + ((alpha2 - alpha1) * alpha))) & 0xFF) << 24) + c;
+    if(red1 > red2) c = (red1 - ((uint) ((red1 - red2) * gradient))) & 0xFF; // Comparison guarantees no overflow, which is Undefined Behaviour
+    else c = (red1 + ((uint) ((red2 - red1) * gradient))) & 0xFF;
+    if(green1 > green2) c = (((green1 - ((uint) ((green1 - green2) * gradient))) & 0xFF) << 8) + c; // Start rebuilding the Color by Bitwises, Bitshifts and Sum to variable "c"
+    else c = (((green1 + ((uint) ((green2 - green1) * gradient))) & 0xFF) << 8) + c;
+    if(blue1 > blue2) c = (((blue1 - ((uint) ((blue1 - blue2) * gradient))) & 0xFF) << 16) + c;
+    else c = (((blue1 + ((uint) ((blue2 - blue1) * gradient))) & 0xFF) << 16) + c;
+    if(alpha1 > alpha2) c = (((alpha1 - ((uint) ((alpha1 - alpha2) * alpha))) & 0xFF) << 24) + c;
+    else c = (((alpha1 + ((uint) ((alpha2 - alpha1) * alpha))) & 0xFF) << 24) + c;
     return c;
 }
 //+------------------------------------------------------------------+
-//| Header Guard #endif
+// Header Guard #endif
 //+------------------------------------------------------------------+
 #endif
 //+------------------------------------------------------------------+
