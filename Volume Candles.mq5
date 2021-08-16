@@ -21,7 +21,7 @@ You should have received a copy of the GNU General Public License along with thi
 #property copyright "2021, Mateus Matucuma Teixeira"
 #property link "https://github.com/BRMateus2/"
 #property description "Volume Colored Candlestick with Bollinger Bands as the Standard Deviation"
-#property version "1.01"
+#property version "1.02"
 #property fpfast
 #property indicator_chart_window
 #property indicator_buffers 8
@@ -269,19 +269,32 @@ int OnCalculate(const int rates_total,
                 const long & volume[],
                 const int& spread[])
 {
-    if(rates_total < iPeriod) { // No need to calculate if the data is less than the requested period - it is returned as 0, because if we return rates_total, then the terminal interprets that the indicator has valid data
+    // Guarantee that Invalid Bars don't have Invalid Chart Data (hide uncalculable Bars), also check for Minimum Bars
+    static int chartBars = Bars(Symbol(), PERIOD_CURRENT);
+    static int chartBarsLast = 0;
+    if((chartBars != chartBarsLast) && (!iShowGradient)) {
+        if((chartBars != 0) && (chartBars < iPeriod)) {
+            ErrorPrint("not enough past data to calculate, the Indicator has \"" + IntegerToString(chartBars) + "\" bars and needs \"" + IntegerToString(iPeriod) + "\" bars");
+        }
+        chartBarsLast = chartBars;
+        for(int i = 0; i < iPeriod && i < rates_total; i++) {
+            iBufOpen[i] = DBL_MIN; // We only need to set iBufOpen, because it is the only checked Buffer
+        }
+    }
+    if(rates_total < iPeriod) { // No need to calculate if the Data is less than the requested Period - it is returned as 0, because if we return rates_total, then the terminal interprets that the Indicator has Valid Data
         return 0;
-    } else if((BarsCalculated(iVolHandle) < rates_total) || (BarsCalculated(iBandsHandle) < rates_total)) { // Indicator data is still not ready
+    } else if((BarsCalculated(iVolHandle) < rates_total) || (BarsCalculated(iBandsHandle) < rates_total)) { // Indicator Data is still not ready
         return 0;
     }
     if((CopyBuffer(iBandsHandle, 1, 0, (rates_total - prev_calculated + 1), iBandsBufUpper) <= 0) || (CopyBuffer(iBandsHandle, 0, 0, (rates_total - prev_calculated + 1), iBandsBufMiddle) <= 0) || (CopyBuffer(iBandsHandle, 2, 0, (rates_total - prev_calculated + 1), iBandsBufLower) <= 0)) { // Try to copy, if there is no data copied for some reason, then we don't need to calculate - also, we don't need to copy rates before prev_calculated as they have the same result
         ErrorPrint("");
         return 0;
     }
-    static int colors = 0; // Only used if iShowGradient
-    static int bars = 0; // Only used if iShowGradient
+    // Only used if iShowGradient
+    static int iShowGradientColors = 0;
+    static int iShowGradientBars = 0;
     // Main loop of calculations
-    int i = (((prev_calculated - 1) > iPeriod) ? (prev_calculated - 1) : iPeriod);
+    int i = (((prev_calculated - 1) > iPeriod) ? (prev_calculated - 1) : (iShowGradient ? 0 : iPeriod));
     for(; i < rates_total && !IsStopped(); i++) {
         iBufOpen[i] = open[i];
         iBufHigh[i] = high[i];
@@ -314,10 +327,10 @@ int OnCalculate(const int rates_total,
             iBufColor[i] = indexColor;
         }
         if(iShowGradient) {
-            iBufColor[i] = colors;
-            if(bars != Bars(Symbol(), PERIOD_CURRENT)) colors++; // Comment this line for color change at every tick, else at every new bar
-            //colors++; // Comment this line for color change at every bar, else at every new tick
-            if(colors >= cGradientSize) colors = 0; // Upper limit for colors indexer
+            iBufColor[i] = iShowGradientColors;
+            if(iShowGradientBars != Bars(Symbol(), PERIOD_CURRENT)) iShowGradientColors++; // Comment this line for color change at every tick, else at every new bar
+            //iShowGradientColors++; // Comment this line for color change at every bar, else at every new tick
+            if(iShowGradientColors >= cGradientSize) iShowGradientColors = 0; // Upper limit for iShowGradientColors indexer
         }
     }
     //PlotIndexSetString(iBufOpenI, PLOT_LABEL, (
@@ -351,7 +364,7 @@ int OnCalculate(const int rates_total,
     //                       "\n Past Close;"
     //                   )); // There is no need for this, for performance reasons and because the old data is not saved (it prints only the Lastest ones), and the ';' separator does the job of changing past candles
     if(iShowGradient) {
-        bars = Bars(Symbol(), PERIOD_CURRENT);
+        iShowGradientBars = Bars(Symbol(), PERIOD_CURRENT);
     }
     return rates_total; // Calculations are done and valid
 }
