@@ -270,8 +270,9 @@ int OnCalculate(const int rates_total,
                 const int& spread[])
 {
     // Guarantee that Invalid Bars don't have Invalid Chart Data (hide uncalculable Bars), also check for Minimum Bars
-    static int chartBars = Bars(Symbol(), PERIOD_CURRENT);
+    static int chartBars = 0;
     static int chartBarsLast = 0;
+    chartBars = Bars(Symbol(), PERIOD_CURRENT);
     if((chartBars != chartBarsLast) && (!iShowGradient)) {
         if((chartBars != 0) && (chartBars < iPeriod)) {
             ErrorPrint("not enough past data to calculate, the Indicator has \"" + IntegerToString(chartBars) + "\" bars and needs \"" + IntegerToString(iPeriod) + "\" bars");
