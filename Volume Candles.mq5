@@ -260,16 +260,16 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 int OnCalculate(const int rates_total,
                 const int prev_calculated,
-                const datetime & time[],
-                const double & open[],
-                const double & high[],
-                const double & low[],
-                const double & close[],
-                const long & tick_volume[],
-                const long & volume[],
+                const datetime& time[],
+                const double& open[],
+                const double& high[],
+                const double& low[],
+                const double& close[],
+                const long& tick_volume[],
+                const long& volume[],
                 const int& spread[])
 {
-    // Guarantee that Invalid Bars don't have Invalid Chart Data (hide uncalculable Bars), also check for Minimum Bars
+    // Guarantee that Invalid Bars don't have Invalid Chart Data (hide incalculable Bars), also check for Minimum Bars
     static int chartBars = 0;
     static int chartBarsLast = 0;
     chartBars = Bars(Symbol(), PERIOD_CURRENT);
